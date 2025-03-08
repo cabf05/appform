@@ -58,8 +58,8 @@ elif page == "Manage Meetings":
 elif page == "Assign Number":
     st.title("Get Your Number")
 
-    # Retrieve parameters from the URL
-    query_params = st.experimental_get_query_params()
+    # Retrieve parameters from the URL using the updated method
+    query_params = st.query_params
     table_name = query_params.get("table", [None])[0]
 
     if not table_name:
