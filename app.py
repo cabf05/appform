@@ -39,30 +39,42 @@ def generate_form(fields):
             form_data[field_name] = st.date_input(field_name)
     return form_data
 
-# Função para enviar dados para o Google Sheets
+# Função para enviar dados para o Google Sheets com tratamento de erros
 def send_to_sheets(sheet_url, data):
-    sheet_id = sheet_url.split("/d/")[1].split("/")[0]
-    api_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:json"
-    headers = list(data.keys())
-    values = list(data.values())
-    
-    # Obtém o número da próxima linha disponível
-    response = requests.get(api_url)
-    if response.status_code == 200:
+    try:
+        # Extrair o ID da planilha
+        sheet_id = sheet_url.split("/d/")[1].split("/")[0]
+        st.write(f"ID da planilha: {sheet_id}")  # Mostra o ID
+
+        # Verificar quantas linhas já existem
+        api_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:json"
+        response = requests.get(api_url)
+        if response.status_code != 200:
+            st.error(f"Erro ao acessar a planilha: {response.text}")
+            return
+
+        # Calcular a próxima linha
         json_data = json.loads(response.text.split("(", 1)[1].rsplit(")", 1)[0])
         rows = json_data.get("table", {}).get("rows", [])
         next_row = len(rows) + 1
-    else:
-        next_row = 1  # Assume a primeira linha se falhar
+        st.write(f"Próxima linha: {next_row}")  # Mostra a linha
 
-    # Envia os dados
-    payload = {
-        "range": f"A{next_row}",
-        "majorDimension": "ROWS",
-        "values": [values]
-    }
-    update_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/A{next_row}:append?valueInputOption=USER_ENTERED&key=AIzaSyC8WvWv1XmYQ0gGvsT2-QA4X5dL3iS6v5s"
-    requests.post(update_url, json=payload)
+        # Preparar os dados
+        values = list(data.values())
+        st.write(f"Dados enviados: {values}")  # Mostra os dados
+
+        # Enviar para a planilha
+        update_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/A{next_row}:append?valueInputOption=USER_ENTERED&key=SUA_CHAVE_API"
+        payload = {"range": f"A{next_row}", "majorDimension": "ROWS", "values": [values]}
+        response = requests.post(update_url, json=payload)
+
+        # Verificar o resultado
+        if response.status_code == 200:
+            st.success("Respostas enviadas com sucesso!")
+        else:
+            st.error(f"Erro ao enviar: {response.text}")
+    except Exception as e:
+        st.error(f"Erro no processo: {e}")
 
 # Interface principal
 st.title("Criador de Formulários Dinâmicos")
@@ -98,7 +110,6 @@ if form_name and uploaded_file and sheet_url:
         
         if st.button("Enviar Respostas"):
             send_to_sheets(sheet_url, form_data)
-            st.success("Respostas enviadas com sucesso!")
     except Exception as e:
         st.error(f"Erro ao processar o formulário: {e}")
 else:
