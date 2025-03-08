@@ -1,116 +1,105 @@
 import streamlit as st
-import pandas as pd
-import requests
-import json
-import openpyxl
-from io import BytesIO
+from supabase import create_client
+import random
+import time
+import io
+from PIL import Image, ImageDraw, ImageFont
 
-# Função para gerar o template Excel dinamicamente
-def generate_template():
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Form"
-    ws.append(["Campo", "Tipo"])
-    # Adiciona linhas de exemplo
-    ws.append(["Nome", "Texto"])
-    ws.append(["Idade", "Número"])
-    ws.append(["Data de Nascimento", "Data"])
-    buffer = BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer
+# --- Initial Setup ---
+st.set_page_config(page_title="Number Assignment", layout="centered")
 
-# Função para ler o arquivo Excel enviado pelo usuário
-def read_template(file):
-    df = pd.read_excel(file, sheet_name="Form")
-    return df
+# --- Function to Connect to Supabase ---
+def get_supabase_client():
+    supabase_url = st.session_state.get("SUPABASE_URL")
+    supabase_key = st.session_state.get("SUPABASE_KEY")
+    if not supabase_url or not supabase_key:
+        st.error("Supabase configuration not found. Go to 'Configuration'.")
+        return None
+    return create_client(supabase_url, supabase_key)
 
-# Função para gerar o formulário dinâmico
-def generate_form(fields):
-    form_data = {}
-    for _, row in fields.iterrows():
-        field_name = row["Campo"]
-        field_type = row["Tipo"]
-        if field_type == "Texto":
-            form_data[field_name] = st.text_input(field_name)
-        elif field_type == "Número":
-            form_data[field_name] = st.number_input(field_name, step=1)
-        elif field_type == "Data":
-            form_data[field_name] = st.date_input(field_name)
-    return form_data
+# --- Sidebar Navigation ---
+st.sidebar.title("Menu")
+page = st.sidebar.radio("Choose an option", ["Configuration", "Manage Meetings", "Assign Number"])
 
-# Função para enviar dados para o Google Sheets com tratamento de erros
-def send_to_sheets(sheet_url, data):
-    try:
-        # Extrair o ID da planilha
-        sheet_id = sheet_url.split("/d/")[1].split("/")[0]
-        st.write(f"ID da planilha: {sheet_id}")  # Mostra o ID
+# --- Page 1: Configuration ---
+if page == "Configuration":
+    st.title("Supabase Configuration")
 
-        # Verificar quantas linhas já existem
-        api_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:json"
-        response = requests.get(api_url)
-        if response.status_code != 200:
-            st.error(f"Erro ao acessar a planilha: {response.text}")
-            return
+    supabase_url = st.text_input("Supabase URL", type="default")
+    supabase_key = st.text_input("Supabase API Key", type="password")
 
-        # Calcular a próxima linha
-        json_data = json.loads(response.text.split("(", 1)[1].rsplit(")", 1)[0])
-        rows = json_data.get("table", {}).get("rows", [])
-        next_row = len(rows) + 1
-        st.write(f"Próxima linha: {next_row}")  # Mostra a linha
+    if st.button("Save Configuration"):
+        st.session_state["SUPABASE_URL"] = supabase_url
+        st.session_state["SUPABASE_KEY"] = supabase_key
+        st.success("Configuration saved successfully!")
 
-        # Preparar os dados
-        values = list(data.values())
-        st.write(f"Dados enviados: {values}")  # Mostra os dados
+# --- Page 2: Manage Meetings ---
+elif page == "Manage Meetings":
+    st.title("Manage Meetings")
+    supabase = get_supabase_client()
+    if not supabase:
+        st.stop()
 
-        # Enviar para a planilha
-        update_url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/A{next_row}:append?valueInputOption=USER_ENTERED&key=SUA_CHAVE_API"
-        payload = {"range": f"A{next_row}", "majorDimension": "ROWS", "values": [values]}
-        response = requests.post(update_url, json=payload)
+    meeting_name = st.text_input("Meeting Name")
 
-        # Verificar o resultado
-        if response.status_code == 200:
-            st.success("Respostas enviadas com sucesso!")
+    if st.button("Create New Meeting"):
+        if meeting_name:
+            table_name = f"meeting_{int(time.time())}"
+            data = [{"Number": i, "Assigned": False} for i in range(1, 1000)]
+
+            supabase.table(table_name).insert(data).execute()
+
+            meeting_link = f"https://yourapp.streamlit.app/?page=assign&table={table_name}"
+            st.success(f"Meeting created! Share this link: {meeting_link}")
         else:
-            st.error(f"Erro ao enviar: {response.text}")
-    except Exception as e:
-        st.error(f"Erro no processo: {e}")
+            st.warning("Enter a meeting name.")
 
-# Interface principal
-st.title("Criador de Formulários Dinâmicos")
+# --- Page 3: Assign Number ---
+elif page == "Assign Number":
+    st.title("Get Your Number")
 
-# Passo 1: Nome do formulário
-st.header("Passo 1: Nome do Formulário")
-form_name = st.text_input("Digite o nome do formulário")
+    # Retrieve parameters from the URL
+    query_params = st.experimental_get_query_params()
+    table_name = query_params.get("table", [None])[0]
 
-# Passo 2: Download do template gerado dinamicamente
-st.header("Passo 2: Baixe o Template Excel")
-template_buffer = generate_template()
-st.download_button(
-    label="Baixar Template",
-    data=template_buffer,
-    file_name="template.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+    if not table_name:
+        st.error("Invalid table.")
+        st.stop()
 
-# Passo 3: Upload do arquivo Excel preenchido
-st.header("Passo 3: Faça o Upload do Arquivo Excel")
-uploaded_file = st.file_uploader("Escolha o arquivo Excel", type=["xlsx"])
+    supabase = get_supabase_client()
+    if not supabase:
+        st.stop()
 
-# Passo 4: Link do Google Sheets
-st.header("Passo 4: Link da Planilha Pública")
-sheet_url = st.text_input("Cole o link da planilha pública do Google Sheets")
+    # Check if the user already has an assigned number stored in the session
+    if "assigned_number" not in st.session_state:
+        response = supabase.table(table_name).select("*").eq("Assigned", False).execute()
 
-# Processamento e geração do formulário
-if form_name and uploaded_file and sheet_url:
-    try:
-        fields = read_template(uploaded_file)
-        st.subheader(f"Formulário: {form_name}")
-        form_data = generate_form(fields)
-        
-        if st.button("Enviar Respostas"):
-            send_to_sheets(sheet_url, form_data)
-    except Exception as e:
-        st.error(f"Erro ao processar o formulário: {e}")
-else:
-    st.info("Por favor, preencha todos os campos para continuar.")
+        if response.data:
+            available_numbers = [row["Number"] for row in response.data]
+            assigned_number = random.choice(available_numbers)
+
+            supabase.table(table_name).update({"Assigned": True}).eq("Number", assigned_number).execute()
+
+            st.session_state["assigned_number"] = assigned_number
+        else:
+            st.error("All numbers have already been assigned!")
+            st.stop()
+
+    st.write(f"Your assigned number is: **{st.session_state['assigned_number']}**")
+
+    if st.button("Save as Image"):
+        st.session_state["save_as_image"] = True
+
+    if st.session_state.get("save_as_image"):
+        number = st.session_state["assigned_number"]
+        img = Image.new("RGB", (400, 200), color=(255, 255, 255))
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.load_default()
+        draw.text((150, 80), str(number), font=font, fill=(0, 0, 0))
+
+        img_buffer = io.BytesIO()
+        img.save(img_buffer, format="PNG")
+        img_buffer.seek(0)
+
+        st.image(img_buffer)
+        st.download_button("Download Image", img_buffer, file_name="my_number.png", mime="image/png")
