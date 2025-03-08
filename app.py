@@ -2,37 +2,34 @@ import streamlit as st
 import pandas as pd
 import requests
 from io import BytesIO
+import csv
 
-# Configuração da página
-st.set_page_config(
-    page_title="Formulário Público",
-    page_icon="📝",
-    layout="centered"
-)
+# Configurações da página
+st.set_page_config(page_title="Formulário Público", page_icon="📝", layout="centered")
 
-# Template Excel para download
 def download_template():
     sample_data = {
-        'Pergunta': ['Qual seu nome?', 'Qual sua cor favorita?'],
-        'Tipo': ['texto', 'selecao'],
-        'Opções': ['', 'Vermelho,Azul,Verde']
+        'Pergunta': ['Qual seu nome?', 'Qual sua idade?'],
+        'Tipo': ['texto', 'numero'],
+        'Opções': ['', '']
     }
     df = pd.DataFrame(sample_data)
     buffer = BytesIO()
     df.to_excel(buffer, index=False)
     return buffer.getvalue()
 
-# Validação do arquivo Excel
 def validate_excel(df):
     required_columns = ['Pergunta', 'Tipo', 'Opções']
     return all(col in df.columns for col in required_columns)
 
-# Conversão para URL de publicação do Google Sheets
-def convert_to_csv_url(sheet_url):
-    return sheet_url.replace('/edit?usp=sharing', '/gviz/tq?tqx=out:csv')
+def convert_sheet_url(url):
+    """Converte URL de edição para URL de exportação CSV"""
+    if '/edit#' in url:
+        return url.replace('/edit#', '/export?format=csv&gid=')
+    return f"{url.split('?')[0]}/export?format=csv"
 
 def main():
-    st.title("📋 Criador de Formulários Públicos")
+    st.title("📋 Formulário Público Simplificado")
     
     # Passo 1: Configuração do formulário
     with st.expander("🔧 Passo 1: Configurar Formulário", expanded=True):
@@ -49,14 +46,18 @@ def main():
 
     # Passo 2: Configuração da planilha
     with st.expander("📊 Passo 2: Configurar Planilha", expanded=False):
-        sheet_url = st.text_input("Cole a URL pública da planilha Google Sheets (deve estar publicada para web):")
-        st.markdown("**Como publicar:** 1. Abra sua planilha 2. Arquivo > Publicar na web > Link 3. Selecione 'Folha inteira' e formato CSV")
+        sheet_url = st.text_input("Cole a URL pública da planilha Google Sheets:")
+        st.markdown("""
+            **Configuração necessária:**
+            1. Compartilhe a planilha como 'Qualquer pessoa com o link pode editar'
+            2. Formato deve ser: https://docs.google.com/spreadsheets/d/SEU_ID/edit
+        """)
 
     if uploaded_file and sheet_url:
         try:
             df = pd.read_excel(uploaded_file)
             if not validate_excel(df):
-                st.error("Arquivo fora do padrão. Use o template fornecido.")
+                st.error("Formato do arquivo inválido. Use o template fornecido.")
                 return
                 
             # Criar formulário
@@ -66,7 +67,7 @@ def main():
                 
                 for _, row in df.iterrows():
                     question = row['Pergunta']
-                    qtype = row['Tipo']
+                    qtype = row['Tipo'].lower()
                     options = row['Opções'].split(',') if pd.notna(row['Opções']) else []
                     
                     if qtype == 'texto':
@@ -77,21 +78,26 @@ def main():
                         responses[question] = st.number_input(question)
                 
                 if st.form_submit_button("Enviar Resposta"):
-                    # Converter dados para CSV
-                    csv_url = convert_to_csv_url(sheet_url)
-                    existing_df = pd.read_csv(csv_url)
-                    new_row = pd.DataFrame([responses])
-                    updated_df = pd.concat([existing_df, new_row], ignore_index=True)
+                    # Converter dados para formato de URL
+                    csv_url = convert_sheet_url(sheet_url)
                     
-                    # Salvar temporariamente e enviar para Google Sheets
-                    updated_csv = updated_df.to_csv(index=False).encode('utf-8')
+                    # Preparar dados para envio
+                    form_data = {
+                        'submit': 'Enviar',
+                        'action': sheet_url.split('/d/')[1].split('/')[0]
+                    }
+                    form_data.update({k: v for k, v in responses.items() if v})
                     
-                    # Upload usando requests (simulação de envio via formulário)
-                    form_id = sheet_url.split('/d/')[1].split('/')[0]
-                    upload_url = f"https://docs.google.com/forms/d/e/{form_id}/formResponse"
-                    requests.post(upload_url, data=responses)
+                    # Enviar dados via POST
+                    response = requests.post(
+                        'https://docs.google.com/forms/d/e/your-form-id/formResponse',
+                        data=form_data
+                    )
                     
-                    st.success("Resposta enviada com sucesso! ✅")
+                    if response.status_code == 200:
+                        st.success("Resposta enviada com sucesso! ✅")
+                    else:
+                        st.error("Erro ao enviar resposta. Verifique a URL da planilha.")
 
         except Exception as e:
             st.error(f"Erro: {str(e)}")
