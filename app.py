@@ -54,7 +54,7 @@ def check_table_exists(supabase, table_name):
 def create_meeting_table(supabase, table_name, meeting_name, max_number=999):
     """Cria uma nova tabela para uma reunião no Supabase e registra os metadados."""
     try:
-        # Registra os metadados da reunião na tabela 'meetings_metadata'
+        # Registrar os metadados da reunião
         supabase.table("meetings_metadata").insert({
             "table_name": table_name,
             "meeting_name": meeting_name,
@@ -62,13 +62,17 @@ def create_meeting_table(supabase, table_name, meeting_name, max_number=999):
             "max_number": max_number
         }).execute()
         
-        # Inserir os números na nova tabela em lotes para evitar sobrecarga
+        # Inserir os números na nova tabela em lotes
         batch_size = 100
         for i in range(0, max_number, batch_size):
             end = min(i + batch_size, max_number)
             data = [{"number": j, "assigned": False, "assigned_at": None, "user_id": None} 
                     for j in range(i+1, end+1)]
-            supabase.table(table_name).insert(data).execute()
+            response = supabase.table(table_name).insert(data).execute()
+            # Se a resposta contiver erro, exiba e interrompa
+            if response.status_code != 201 and response.status_code != 200:
+                st.error(f"Erro na inserção de dados (batch {i}-{end}): {response.data}")
+                return False
         return True
     except Exception as e:
         st.error(f"Erro ao criar tabela da reunião: {str(e)}")
@@ -114,7 +118,7 @@ def generate_number_image(number):
     # Texto de rodapé
     footer_text = "Seu número para o evento"
     footer_font = ImageFont.load_default()
-    footer_bbox = draw.textbbox((0,0), footer_text, font=footer_font)
+    footer_bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
     footer_width = footer_bbox[2] - footer_bbox[0]
     footer_position = ((width - footer_width) // 2, height - 40)
     draw.text(footer_position, footer_text, font=footer_font, fill=(80, 80, 80))
@@ -263,7 +267,11 @@ elif page == "Atribuir Número":
                 selected = st.selectbox("Selecione uma reunião:", list(options.keys()))
                 if st.button("Ir para a Reunião"):
                     selected_table = options[selected]
-                    st.set_query_params(page="Atribuir Número", table=selected_table)
+                    # Fallback para st.set_query_params
+                    if hasattr(st, "set_query_params"):
+                        st.set_query_params(page="Atribuir Número", table=selected_table)
+                    else:
+                        st.experimental_set_query_params(page="Atribuir Número", table=selected_table)
                     st.experimental_rerun()
         st.stop()
     else:
