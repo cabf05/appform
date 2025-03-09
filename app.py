@@ -77,7 +77,9 @@ def create_meeting_table(supabase, table_name, meeting_name, max_number=999):
         response_create = supabase.rpc("execute_sql", {"query": create_table_query}).execute()
         st.write(f"Resposta da criação da tabela: {response_create.data}")
 
-        # Verificar se a tabela foi realmente criada
+        # Verificar se a tabela foi criada e esperar um pouco
+        st.write(f"Verificando se {table_name} existe...")
+        time.sleep(1)  # Pequena pausa para propagação
         if not check_table_exists(supabase, table_name):
             raise Exception(f"Tabela {table_name} não foi criada com sucesso no Supabase.")
 
@@ -202,7 +204,7 @@ if page == "Configuração":
 1. Crie uma conta no [Supabase](https://supabase.com/)
 2. Crie um novo projeto
 3. Vá para Configurações > API
-4. Copie a URL e a chave (recomenda-se usar a 'service_role' para criar tabelas)
+4. Copie a URL e a chave 'service_role' (recomendada para criar tabelas)
 5. Cole nos campos acima
 
 **Importante**: Execute os seguintes comandos SQL no Supabase:
@@ -230,8 +232,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Conceda permissão à chave usada
-GRANT EXECUTE ON FUNCTION execute_sql TO service_role; -- Use 'anon' se estiver usando a chave anon
+-- Conceda permissão à chave service_role
+GRANT EXECUTE ON FUNCTION execute_sql TO service_role;
+
+-- Desative RLS temporariamente para teste (opcional)
+ALTER TABLE meetings_metadata DISABLE ROW LEVEL SECURITY;
         """)
 
 # --- Página 2: Gerenciar Reuniões ---
