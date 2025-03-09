@@ -122,7 +122,7 @@ def generate_number_image(number):
     
     # Load font
     try:
-        font = ImageFont.truetype("Arial.ttf", 200)  # Increased font size for emphasis
+        font = ImageFont.truetype("Arial.ttf", 200)
     except IOError:
         font = ImageFont.load_default()
     
@@ -221,15 +221,12 @@ if mode == "participant" and table_name_from_url:
 
 else:
     # --- Master Mode ---
-    if "page" not in st.session_state:
+    valid_pages = ["Manage Meetings", "Share Meeting Link", "View Statistics"]
+    if "page" not in st.session_state or st.session_state["page"] not in valid_pages:
         st.session_state["page"] = "Manage Meetings"
 
     st.sidebar.title("Menu (Master)")
-    page = st.sidebar.radio("Choose an option", [
-        "Manage Meetings", 
-        "Assign Number",
-        "View Statistics"
-    ], index=["Manage Meetings", "Assign Number", "View Statistics"].index(st.session_state["page"]))
+    page = st.sidebar.radio("Choose an option", valid_pages, index=valid_pages.index(st.session_state["page"]))
 
     # --- Page 1: Manage Meetings ---
     if page == "Manage Meetings":
@@ -258,7 +255,7 @@ else:
                                 st.success(f"Meeting '{meeting_name}' created successfully!")
                                 st.markdown(f"**Participant Link:** [{participant_link}]({participant_link})")
                                 st.session_state["selected_table"] = table_name
-                                st.session_state["page"] = "Assign Number"
+                                st.session_state["page"] = "Share Meeting Link"
                                 st.rerun()
                             else:
                                 st.error("Failed to create the meeting.")
@@ -297,89 +294,32 @@ else:
         else:
             st.info("No meetings available or error accessing Supabase.")
 
-    # --- Page 2: Assign Number (Master) ---
-    elif page == "Assign Number":
-        st.session_state["page"] = "Assign Number"
-        st.markdown("<h1 class='main-header'>Get Your Number (Master)</h1>", unsafe_allow_html=True)
+    # --- Page 2: Share Meeting Link (Master) ---
+    elif page == "Share Meeting Link":
+        st.session_state["page"] = "Share Meeting Link"
+        st.markdown("<h1 class='main-header'>Share Meeting Link</h1>", unsafe_allow_html=True)
         
-        table_name = st.session_state.get("selected_table", None)
-        
-        if not table_name:
-            st.error("No table specified. Select a meeting below:")
-            supabase = get_supabase_client()
-            if supabase:
-                meetings = get_available_meetings(supabase)
-                if meetings:
-                    options = {f"{m['meeting_name']} ({m['table_name']})": m["table_name"] 
-                               for m in meetings if "table_name" in m and "meeting_name" in m}
-                    selected = st.selectbox("Select a meeting:", list(options.keys()))
-                    if st.button("Go to Meeting"):
-                        st.session_state["selected_table"] = options[selected]
-                        st.session_state["page"] = "Assign Number"
-                        st.rerun()
+        supabase = get_supabase_client()
+        if not supabase:
             st.stop()
-        else:
-            supabase = get_supabase_client()
-            if not supabase:
-                st.stop()
-            if not check_table_exists(supabase, table_name):
-                st.error("Meeting table not found. The meeting may have been closed.")
-                st.stop()
-            
-            try:
-                meeting_info = supabase.table("meetings_metadata").select("*").eq("table_name", table_name).execute()
-                meeting_name = meeting_info.data[0]["meeting_name"] if meeting_info.data else "Meeting"
-                st.subheader(f"Meeting: {meeting_name}")
-            except Exception:
-                st.subheader("Get a number for the meeting")
-            
-            user_id = st.session_state.get("user_id")
-            try:
-                existing = supabase.table(table_name).select("*").eq("user_id", user_id).execute()
-                if existing.data:
-                    st.session_state["assigned_number"] = existing.data[0]["number"]
-                    st.markdown(f"""
-                    <div class='success-msg'>
-                        <p>You already have an assigned number:</p>
-                        <div class='number-display'>{st.session_state['assigned_number']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    if "assigned_number" not in st.session_state:
-                        with st.spinner("Assigning a number..."):
-                            response = supabase.table(table_name).select("*").eq("assigned", False).execute()
-                            if response.data:
-                                available_numbers = [row["number"] for row in response.data]
-                                assigned_number = random.choice(available_numbers)
-                                supabase.table(table_name).update({
-                                    "assigned": True,
-                                    "assigned_at": datetime.now().isoformat(),
-                                    "user_id": user_id
-                                }).eq("number", assigned_number).execute()
-                                st.session_state["assigned_number"] = assigned_number
-                            else:
-                                st.error("All numbers have been assigned!")
-                                st.stop()
-                    st.markdown(f"""
-                    <div class='success-msg'>
-                        <p>Your assigned number is:</p>
-                        <div class='number-display'>{st.session_state['assigned_number']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"Error assigning number: {str(e)}")
-                st.stop()
-            
-            if st.button("Save as Image"):
-                with st.spinner("Generating image..."):
-                    img_buffer = generate_number_image(st.session_state["assigned_number"])
-                    st.image(img_buffer)
-                    st.download_button(
-                        "Download Image",
-                        img_buffer,
-                        file_name=f"my_number_{st.session_state['assigned_number']}.png",
-                        mime="image/png"
-                    )
+        
+        meetings = get_available_meetings(supabase)
+        if not meetings:
+            st.info("No meetings available. Create a meeting first.")
+            st.stop()
+        
+        options = {f"{m['meeting_name']} ({m['table_name']})": m["table_name"] 
+                   for m in meetings if "table_name" in m and "meeting_name" in m}
+        selected = st.selectbox("Select a meeting to share:", list(options.keys()))
+        
+        if selected:
+            selected_table = options[selected]
+            participant_link = generate_participant_link(selected_table)
+            st.markdown(f"**Participant Link:** [{participant_link}]({participant_link})")
+            if st.button("Copy Link"):
+                st.write("Link copied to clipboard!")
+                st.code(participant_link)  # Display the link for manual copying if needed
+                # Note: Streamlit doesn't natively copy to clipboard; users can copy manually from the text
 
     # --- Page 3: View Statistics ---
     elif page == "View Statistics":
@@ -430,7 +370,7 @@ else:
                             df["time"] = pd.to_datetime(df["time"])
                             df["hour"] = df["time"].dt.floor("H")
                             hourly_counts = df.groupby("hour").count().reset_index()
-                            hourly_counts["hour_str"] = hourly_counts["hour"].dt.strftime("%m/%d %H:00")  # US date format
+                            hourly_counts["hour_str"] = hourly_counts["hour"].dt.strftime("%m/%d %H:00")
                             st.subheader("Number Assignments per Hour")
                             st.bar_chart(data=hourly_counts, x="hour_str", y="count")
                 except Exception:
