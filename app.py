@@ -75,7 +75,11 @@ def create_meeting_table(supabase, table_name, meeting_name, max_number=999):
         );
         """
         response_create = supabase.rpc("execute_sql", {"query": create_table_query}).execute()
-        st.write(f"Tabela criada: {response_create.data}")
+        st.write(f"Resposta da criação da tabela: {response_create.data}")
+
+        # Verificar se a tabela foi realmente criada
+        if not check_table_exists(supabase, table_name):
+            raise Exception(f"Tabela {table_name} não foi criada com sucesso no Supabase.")
 
         # Passo 3: Inserir os números na nova tabela em lotes
         st.write(f"Inserindo números em {table_name}...")
@@ -84,8 +88,11 @@ def create_meeting_table(supabase, table_name, meeting_name, max_number=999):
             end = min(i + batch_size, max_number)
             data = [{"number": j, "assigned": False, "assigned_at": None, "user_id": None} 
                     for j in range(i+1, end+1)]
-            response_insert = supabase.table(table_name).insert(data).execute()
-            st.write(f"Batch {i}-{end} inserido: {len(response_insert.data)} registros")
+            try:
+                response_insert = supabase.table(table_name).insert(data).execute()
+                st.write(f"Batch {i}-{end} inserido: {len(response_insert.data)} registros")
+            except Exception as insert_e:
+                raise Exception(f"Erro ao inserir batch {i}-{end}: {str(insert_e)}")
         
         st.success(f"Tabela {table_name} criada e populada com sucesso!")
         return True
@@ -195,10 +202,10 @@ if page == "Configuração":
 1. Crie uma conta no [Supabase](https://supabase.com/)
 2. Crie um novo projeto
 3. Vá para Configurações > API
-4. Copie a URL e a chave (anon/public ou service_role)
+4. Copie a URL e a chave (recomenda-se usar a 'service_role' para criar tabelas)
 5. Cole nos campos acima
 
-**Importante**: Crie a seguinte tabela e função no seu Supabase:
+**Importante**: Execute os seguintes comandos SQL no Supabase:
 
 -- Tabela de metadados das reuniões
 CREATE TABLE public.meetings_metadata (
@@ -223,8 +230,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Conceda permissão à chave usada (anon ou service_role)
-GRANT EXECUTE ON FUNCTION execute_sql TO anon; -- ou service_role, dependendo da chave
+-- Conceda permissão à chave usada
+GRANT EXECUTE ON FUNCTION execute_sql TO service_role; -- Use 'anon' se estiver usando a chave anon
         """)
 
 # --- Página 2: Gerenciar Reuniões ---
