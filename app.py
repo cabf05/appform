@@ -28,58 +28,55 @@ st.markdown("""
 # --- Functions ---
 
 def get_supabase_client() -> Client:
-    """Estabelece conexão com o Supabase usando as credenciais armazenadas na sessão."""
+    """Establish connection with Supabase using credentials stored in session."""
     supabase_url = st.session_state.get("SUPABASE_URL")
     supabase_key = st.session_state.get("SUPABASE_KEY")
     if not supabase_url or not supabase_key:
-        st.error("Configuração do Supabase não encontrada. Vá para 'Configuração'.")
+        st.error("Supabase configuration not found. Go to 'Configuração'.")
         return None
     try:
         client = create_client(supabase_url, supabase_key)
-        # Testa a conexão usando a tabela _dummy (certifique-se de que ela exista)
+        # Test the connection using the _dummy table (must exist)
         client.table("_dummy").select("*").limit(1).execute()
         return client
     except Exception as e:
-        st.error(f"Erro ao conectar com o Supabase: {str(e)}")
+        st.error(f"Error connecting to Supabase: {str(e)}")
         return None
 
-def check_table_exists(supabase, table_name):
-    """Verifica se uma tabela específica existe no Supabase."""
+def create_meeting(supabase, meeting_id, meeting_name, max_number=999):
+    """
+    Create a new meeting by inserting metadata in meetings_metadata and
+    populating meeting_numbers with all available numbers for that meeting.
+    """
     try:
-        supabase.table(table_name).select("*").limit(1).execute()
-        return True
-    except Exception:
-        return False
-
-def create_meeting_table(supabase, table_name, meeting_name, max_number=999):
-    """Cria uma nova tabela para uma reunião no Supabase e registra os metadados."""
-    try:
-        # Registrar os metadados da reunião
+        # Insert meeting metadata
         supabase.table("meetings_metadata").insert({
-            "table_name": table_name,
+            "meeting_id": meeting_id,
             "meeting_name": meeting_name,
             "created_at": datetime.now().isoformat(),
             "max_number": max_number
         }).execute()
         
-        # Inserir os números na nova tabela em lotes
+        # Insert numbers into meeting_numbers in batches
         batch_size = 100
         for i in range(0, max_number, batch_size):
             end = min(i + batch_size, max_number)
-            data = [{"number": j, "assigned": False, "assigned_at": None, "user_id": None} 
-                    for j in range(i+1, end+1)]
-            response = supabase.table(table_name).insert(data).execute()
-            # Se a resposta contiver erro, exiba e interrompa
-            if response.status_code != 201 and response.status_code != 200:
-                st.error(f"Erro na inserção de dados (batch {i}-{end}): {response.data}")
-                return False
+            data = [{
+                "meeting_id": meeting_id,
+                "number": j,
+                "assigned": False,
+                "assigned_at": None,
+                "user_id": None
+            } for j in range(i+1, end+1)]
+            response = supabase.table("meeting_numbers").insert(data).execute()
+            # (Optional) Check response here if needed
         return True
     except Exception as e:
-        st.error(f"Erro ao criar tabela da reunião: {str(e)}")
+        st.error(f"Erro ao criar reunião: {str(e)}")
         return False
 
 def get_available_meetings(supabase):
-    """Obtém a lista de reuniões disponíveis na tabela de metadados."""
+    """Retrieve the list of available meetings from meetings_metadata."""
     try:
         response = supabase.table("meetings_metadata").select("*").execute()
         return response.data
@@ -88,12 +85,12 @@ def get_available_meetings(supabase):
         return []
 
 def generate_number_image(number):
-    """Gera uma imagem com o número atribuído."""
+    """Generate an image with the assigned number."""
     width, height = 600, 300
-    img = Image.new("RGB", (width, height), color=(255, 255, 255))
+    img = Image.new("RGB", (width, height), color=(255,255,255))
     draw = ImageDraw.Draw(img)
     
-    # Fundo com gradiente simples
+    # Simple gradient background
     for y in range(height):
         r = int(220 - y/3)
         g = int(240 - y/3)
@@ -101,21 +98,20 @@ def generate_number_image(number):
         for x in range(width):
             draw.point((x, y), fill=(r, g, b))
     
-    # Tenta carregar uma fonte personalizada
+    # Try loading a custom font
     try:
         font = ImageFont.truetype("Arial.ttf", 120)
     except IOError:
         font = ImageFont.load_default()
     
     number_text = str(number)
-    # Usando textbbox para calcular as dimensões do texto
     bbox = draw.textbbox((0, 0), number_text, font=font)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
     text_position = ((width - text_width) // 2, (height - text_height) // 2 - 30)
     draw.text(text_position, number_text, font=font, fill=(0, 0, 100))
     
-    # Texto de rodapé
+    # Footer text
     footer_text = "Seu número para o evento"
     footer_font = ImageFont.load_default()
     footer_bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
@@ -128,7 +124,7 @@ def generate_number_image(number):
     img_buffer.seek(0)
     return img_buffer
 
-# --- Inicializar Variáveis de Sessão ---
+# --- Initialize Session Variables ---
 if "user_id" not in st.session_state:
     st.session_state["user_id"] = str(uuid.uuid4())
 
@@ -141,17 +137,15 @@ page = st.sidebar.radio("Escolha uma opção", [
     "Ver Estatísticas"
 ])
 
-# --- Página 1: Configuração ---
+# --- Page 1: Configuração ---
 if page == "Configuração":
     st.markdown("<h1 class='main-header'>Configuração do Supabase</h1>", unsafe_allow_html=True)
     saved_url = st.session_state.get("SUPABASE_URL", "")
     saved_key = st.session_state.get("SUPABASE_KEY", "")
-    
     with st.form("config_form"):
         supabase_url = st.text_input("URL do Supabase", value=saved_url)
         supabase_key = st.text_input("Chave API do Supabase", type="password", value=saved_key)
         submit_button = st.form_submit_button("Salvar Configuração")
-        
         if submit_button:
             if supabase_url and supabase_key:
                 st.session_state["SUPABASE_URL"] = supabase_url
@@ -164,7 +158,6 @@ if page == "Configuração":
                     st.error(f"Erro ao testar conexão: {str(e)}")
             else:
                 st.warning("Por favor, preencha todos os campos.")
-    
     with st.expander("Como configurar o Supabase"):
         st.markdown("""
 1. Crie uma conta no [Supabase](https://supabase.com/)
@@ -173,15 +166,25 @@ if page == "Configuração":
 4. Copie a URL e a chave (anon/public)
 5. Cole nos campos acima
 
-**Importante**: Crie as seguintes tabelas no seu Supabase:
+**Importante:** Crie as seguintes tabelas no seu Supabase:
 
 -- Tabela de metadados das reuniões
 CREATE TABLE public.meetings_metadata (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    table_name TEXT NOT NULL,
+    meeting_id TEXT NOT NULL,
     meeting_name TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT timezone('utc', now()) NOT NULL,
     max_number INTEGER DEFAULT 999
+);
+
+-- Tabela de números das reuniões
+CREATE TABLE public.meeting_numbers (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    meeting_id TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    assigned BOOLEAN DEFAULT false,
+    assigned_at TIMESTAMPTZ,
+    user_id TEXT
 );
 
 -- Tabela dummy para teste de conexão
@@ -191,49 +194,50 @@ CREATE TABLE public._dummy (
 );
         """)
 
-# --- Página 2: Gerenciar Reuniões ---
+# --- Page 2: Gerenciar Reuniões ---
 elif page == "Gerenciar Reuniões":
     st.markdown("<h1 class='main-header'>Gerenciar Reuniões</h1>", unsafe_allow_html=True)
     supabase = get_supabase_client()
     if not supabase:
         st.stop()
-    
     with st.form("create_meeting_form"):
         st.subheader("Criar Nova Reunião")
         meeting_name = st.text_input("Nome da Reunião")
         max_number = st.number_input("Número Máximo", min_value=10, max_value=10000, value=999)
         submit_button = st.form_submit_button("Criar Reunião")
-        
         if submit_button:
             if meeting_name:
-                # Gera um nome único para a tabela
-                table_name = f"meeting_{int(time.time())}_{meeting_name.lower().replace(' ', '_')}"
-                if check_table_exists(supabase, table_name):
-                    st.error("Já existe uma reunião com este nome. Tente outro nome.")
+                # Generate a unique meeting_id
+                meeting_id = f"meeting_{int(time.time())}_{meeting_name.lower().replace(' ', '_')}"
+                # Check if a meeting with this meeting_id already exists
+                existing = supabase.table("meetings_metadata").select("*").eq("meeting_id", meeting_id).execute()
+                if existing.data:
+                    st.error("Já existe uma reunião com esse nome. Tente outro nome.")
                 else:
                     with st.spinner("Criando reunião..."):
-                        success = create_meeting_table(supabase, table_name, meeting_name, max_number)
+                        success = create_meeting(supabase, meeting_id, meeting_name, max_number)
                         if success:
-                            # Gera um link relativo para acessar a reunião
-                            meeting_link = f"?page=Atribuir%20Número&table={table_name}"
+                            meeting_link = f"?page=Atribuir%20Número&meeting_id={meeting_id}"
                             st.markdown(f"[Clique aqui para acessar a reunião]({meeting_link})")
                         else:
                             st.error("Falha na criação da reunião.")
             else:
                 st.warning("Digite um nome para a reunião.")
-    
     st.subheader("Reuniões Existentes")
     meetings = get_available_meetings(supabase)
     if meetings:
         meeting_data = []
         for meeting in meetings:
-            if "table_name" in meeting and "meeting_name" in meeting:
+            if "meeting_id" in meeting and "meeting_name" in meeting:
                 try:
-                    count_response = supabase.table(meeting["table_name"]).select("*", count="exact").eq("assigned", True).execute()
+                    count_response = supabase.table("meeting_numbers")\
+                        .select("*", count="exact")\
+                        .eq("meeting_id", meeting["meeting_id"])\
+                        .eq("assigned", True).execute()
                     assigned_count = count_response.count if hasattr(count_response, 'count') else 0
                     meeting_data.append({
                         "Nome": meeting.get("meeting_name", "Sem nome"),
-                        "Tabela": meeting.get("table_name", ""),
+                        "Meeting ID": meeting.get("meeting_id", ""),
                         "Criada em": meeting.get("created_at", "")[:16].replace("T", " "),
                         "Números Atribuídos": assigned_count,
                         "Total de Números": meeting.get("max_number", 0)
@@ -248,51 +252,46 @@ elif page == "Gerenciar Reuniões":
     else:
         st.info("Nenhuma reunião disponível.")
 
-# --- Página 3: Atribuir Número ---
+# --- Page 3: Atribuir Número ---
 elif page == "Atribuir Número":
     st.markdown("<h1 class='main-header'>Obtenha Seu Número</h1>", unsafe_allow_html=True)
-    
-    # Recupera os parâmetros da URL usando st.query_params
+    # Retrieve URL parameters using st.query_params
     query_params = st.query_params
-    table_name = query_params.get("table", None)
-    
-    if not table_name:
-        st.error("Tabela não especificada. Selecione uma reunião abaixo:")
+    meeting_id = query_params.get("meeting_id", None)
+    if not meeting_id:
+        st.error("Meeting ID não especificado. Selecione uma reunião abaixo:")
         supabase = get_supabase_client()
         if supabase:
             meetings = get_available_meetings(supabase)
             if meetings:
-                options = {f"{m['meeting_name']} ({m['table_name']})": m["table_name"] 
-                           for m in meetings if "table_name" in m and "meeting_name" in m}
+                options = {f"{m['meeting_name']} ({m['meeting_id']})": m["meeting_id"] 
+                           for m in meetings if "meeting_id" in m and "meeting_name" in m}
                 selected = st.selectbox("Selecione uma reunião:", list(options.keys()))
                 if st.button("Ir para a Reunião"):
-                    selected_table = options[selected]
-                    # Fallback para st.set_query_params
-                    if hasattr(st, "set_query_params"):
-                        st.set_query_params(page="Atribuir Número", table=selected_table)
-                    else:
-                        st.experimental_set_query_params(page="Atribuir Número", table=selected_table)
-                    st.experimental_rerun()
+                    selected_meeting_id = options[selected]
+                    st.markdown(f"[Clique aqui para acessar a reunião](?page=Atribuir%20Número&meeting_id={selected_meeting_id})")
+                    st.stop()
         st.stop()
     else:
         supabase = get_supabase_client()
         if not supabase:
             st.stop()
-        if not check_table_exists(supabase, table_name):
-            st.error("Tabela da reunião não encontrada. A reunião pode ter sido encerrada.")
+        # Verify that the meeting exists
+        meeting_info = supabase.table("meetings_metadata").select("*").eq("meeting_id", meeting_id).execute()
+        if not meeting_info.data:
+            st.error("Reunião não encontrada. Ela pode ter sido encerrada.")
             st.stop()
-        
-        try:
-            meeting_info = supabase.table("meetings_metadata").select("*").eq("table_name", table_name).execute()
-            meeting_name = meeting_info.data[0]["meeting_name"] if meeting_info.data else "Reunião"
+        else:
+            meeting_name = meeting_info.data[0]["meeting_name"]
             st.subheader(f"Reunião: {meeting_name}")
-        except Exception:
-            st.subheader("Obter número para a reunião")
         
         user_id = st.session_state.get("user_id")
         try:
-            # Verifica se o usuário já possui um número atribuído nesta reunião
-            existing = supabase.table(table_name).select("*").eq("user_id", user_id).execute()
+            # Check if the user already has an assigned number for this meeting
+            existing = supabase.table("meeting_numbers")\
+                .select("*")\
+                .eq("meeting_id", meeting_id)\
+                .eq("user_id", user_id).execute()
             if existing.data:
                 st.session_state["assigned_number"] = existing.data[0]["number"]
                 st.markdown(f"""
@@ -304,15 +303,18 @@ elif page == "Atribuir Número":
             else:
                 if "assigned_number" not in st.session_state:
                     with st.spinner("Atribuindo um número..."):
-                        response = supabase.table(table_name).select("*").eq("assigned", False).execute()
+                        response = supabase.table("meeting_numbers")\
+                            .select("*")\
+                            .eq("meeting_id", meeting_id)\
+                            .eq("assigned", False).execute()
                         if response.data:
                             available_numbers = [row["number"] for row in response.data]
                             assigned_number = random.choice(available_numbers)
-                            supabase.table(table_name).update({
+                            supabase.table("meeting_numbers").update({
                                 "assigned": True,
                                 "assigned_at": datetime.now().isoformat(),
                                 "user_id": user_id
-                            }).eq("number", assigned_number).execute()
+                            }).eq("meeting_id", meeting_id).eq("number", assigned_number).execute()
                             st.session_state["assigned_number"] = assigned_number
                         else:
                             st.error("Todos os números já foram atribuídos!")
@@ -338,28 +340,30 @@ elif page == "Atribuir Número":
                     mime="image/png"
                 )
 
-# --- Página 4: Ver Estatísticas ---
+# --- Page 4: Ver Estatísticas ---
 elif page == "Ver Estatísticas":
     st.markdown("<h1 class='main-header'>Estatísticas de Reuniões</h1>", unsafe_allow_html=True)
     supabase = get_supabase_client()
     if not supabase:
         st.stop()
-    
     meetings = get_available_meetings(supabase)
     if not meetings:
         st.info("Não há reuniões disponíveis para análise.")
         st.stop()
-    
-    options = {f"{m['meeting_name']} ({m['table_name']})": m["table_name"] 
-               for m in meetings if "table_name" in m and "meeting_name" in m}
+    options = {f"{m['meeting_name']} ({m['meeting_id']})": m["meeting_id"] 
+               for m in meetings if "meeting_id" in m and "meeting_name" in m}
     selected = st.selectbox("Selecione uma reunião:", list(options.keys()))
-    
     if selected:
-        selected_table = options[selected]
+        selected_meeting_id = options[selected]
         try:
-            total_response = supabase.table(selected_table).select("*", count="exact").execute()
+            total_response = supabase.table("meeting_numbers")\
+                .select("*", count="exact")\
+                .eq("meeting_id", selected_meeting_id).execute()
             total_numbers = total_response.count if hasattr(total_response, 'count') else 0
-            assigned_response = supabase.table(selected_table).select("*", count="exact").eq("assigned", True).execute()
+            assigned_response = supabase.table("meeting_numbers")\
+                .select("*", count="exact")\
+                .eq("meeting_id", selected_meeting_id)\
+                .eq("assigned", True).execute()
             assigned_numbers = assigned_response.count if hasattr(assigned_response, 'count') else 0
             percentage = (assigned_numbers / total_numbers) * 100 if total_numbers > 0 else 0
             
@@ -372,7 +376,10 @@ elif page == "Ver Estatísticas":
                 st.metric("Percentual Atribuído", f"{percentage:.1f}%")
             
             try:
-                time_data_response = supabase.table(selected_table).select("*").eq("assigned", True).order("assigned_at").execute()
+                time_data_response = supabase.table("meeting_numbers")\
+                    .select("*")\
+                    .eq("meeting_id", selected_meeting_id)\
+                    .eq("assigned", True).order("assigned_at").execute()
                 if time_data_response.data:
                     time_data = []
                     for item in time_data_response.data:
@@ -394,14 +401,16 @@ elif page == "Ver Estatísticas":
             
             if st.button("Exportar Dados"):
                 try:
-                    all_data_response = supabase.table(selected_table).select("*").execute()
+                    all_data_response = supabase.table("meeting_numbers")\
+                        .select("*")\
+                        .eq("meeting_id", selected_meeting_id).execute()
                     if all_data_response.data:
                         df = pd.DataFrame(all_data_response.data)
                         csv = df.to_csv(index=False)
                         st.download_button(
                             "Baixar CSV",
                             csv,
-                            file_name=f"{selected_table}_export.csv",
+                            file_name=f"{selected_meeting_id}_export.csv",
                             mime="text/csv"
                         )
                 except Exception as e:
