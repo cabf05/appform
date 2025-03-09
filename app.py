@@ -145,6 +145,7 @@ def generate_participant_link(table_name):
     return f"{base_url}/?table={table_name}&mode=participant"
 
 # --- Initialize Session Variables ---
+# Ensure user_id persists across page refreshes
 if "user_id" not in st.session_state:
     st.session_state["user_id"] = str(uuid.uuid4())
 
@@ -173,37 +174,40 @@ if mode == "participant" and table_name_from_url:
 
     user_id = st.session_state["user_id"]
     try:
-        existing = supabase.table(table_name_from_url).select("*").eq("user_id", user_id).execute()
+        # Check if the user already has an assigned number
+        existing = supabase.table(table_name_from_url).select("number").eq("user_id", user_id).execute()
         if existing.data:
-            st.session_state["assigned_number"] = existing.data[0]["number"]
-            st.markdown(f"""
-            <div class='success-msg'>
-                <p>You already have an assigned number:</p>
-                <div class='number-display'>{st.session_state['assigned_number']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            if "assigned_number" not in st.session_state:
-                with st.spinner("Assigning a number..."):
-                    response = supabase.table(table_name_from_url).select("*").eq("assigned", False).execute()
-                    if response.data:
-                        available_numbers = [row["number"] for row in response.data]
-                        assigned_number = random.choice(available_numbers)
-                        supabase.table(table_name_from_url).update({
-                            "assigned": True,
-                            "assigned_at": datetime.now().isoformat(),
-                            "user_id": user_id
-                        }).eq("number", assigned_number).execute()
-                        st.session_state["assigned_number"] = assigned_number
-                    else:
-                        st.error("All numbers have been assigned!")
-                        st.stop()
+            # If the user already has a number, use it
+            assigned_number = existing.data[0]["number"]
+            st.session_state["assigned_number"] = assigned_number
             st.markdown(f"""
             <div class='success-msg'>
                 <p>Your assigned number is:</p>
                 <div class='number-display'>{st.session_state['assigned_number']}</div>
             </div>
             """, unsafe_allow_html=True)
+        else:
+            # If no number is assigned yet, generate one
+            with st.spinner("Assigning a number..."):
+                response = supabase.table(table_name_from_url).select("*").eq("assigned", False).execute()
+                if response.data:
+                    available_numbers = [row["number"] for row in response.data]
+                    assigned_number = random.choice(available_numbers)
+                    supabase.table(table_name_from_url).update({
+                        "assigned": True,
+                        "assigned_at": datetime.now().isoformat(),
+                        "user_id": user_id
+                    }).eq("number", assigned_number).execute()
+                    st.session_state["assigned_number"] = assigned_number
+                    st.markdown(f"""
+                    <div class='success-msg'>
+                        <p>Your assigned number is:</p>
+                        <div class='number-display'>{st.session_state['assigned_number']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.error("All numbers have been assigned!")
+                    st.stop()
     except Exception as e:
         st.error(f"Error assigning number: {str(e)}")
         st.stop()
@@ -318,8 +322,7 @@ else:
             st.markdown(f"**Participant Link:** [{participant_link}]({participant_link})")
             if st.button("Copy Link"):
                 st.write("Link copied to clipboard!")
-                st.code(participant_link)  # Display the link for manual copying if needed
-                # Note: Streamlit doesn't natively copy to clipboard; users can copy manually from the text
+                st.code(participant_link)
 
     # --- Page 3: View Statistics ---
     elif page == "View Statistics":
